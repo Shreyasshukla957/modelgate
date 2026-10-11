@@ -9,7 +9,7 @@ const usageLogSchema = new Schema(
     inputTokens: { type: Number, required: true, default: 0 },
     outputTokens: { type: Number, required: true, default: 0 },
     estimatedCostUsd: { type: Number, required: true, default: 0 },
-    status: { type: String, required: true, enum: ["success", "failed"] },
+    status: { type: String, required: true, enum: ["pending", "success", "failed"] },
     errorCode: { type: String }
   },
   { timestamps: true }
