@@ -57,6 +57,16 @@ The repository includes `render.yaml` for a Render Blueprint deployment. Add the
 
 See TESTING.md for verification steps, and DECISIONS.md and AI-LOG.md for the engineering rationale and AI-use record.
 
+
+### Live deployment
+
+ModelGate is deployed at `https://modelgate.onrender.com`.
+
+```bash
+curl https://modelgate.onrender.com/health
+```
+
+The response is `{"status":"ok"}`. Use the API examples above with the deployed base URL and your own virtual key.
 ## Integration checklist
 
 After adding a local `.env`, verify the service in this order:

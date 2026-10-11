@@ -33,3 +33,12 @@ The current tests cover retry behavior, non-retryable provider errors, token-cos
 ## Deployment verification
 
 After deploying with `render.yaml`, repeat the health and virtual-key checks against the public URL. Configure a reachable managed Redis instance if the optional burst rate limit is required in that environment.
+
+## Production verification
+
+The deployed service is available at `https://modelgate.onrender.com`.
+
+- `GET /health` returned `200` with `{ "status": "ok" }`.
+- The protected admin endpoint created a virtual key with `201`.
+- A real Gemini completion returned `200` with the requested response.
+- The protected usage endpoint returned `200` and recorded one successful request with input and output token totals.

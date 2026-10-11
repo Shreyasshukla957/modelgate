@@ -114,3 +114,6 @@ The configured Gemini account reports that `gemini-2.5-flash` is unavailable to 
 ## 21. Final local verification guide
 
 I added `TESTING.md` so a reviewer can repeat the automated and local API checks without seeing credentials. I verified that `.env.example` contains every configuration variable used by the application and contains placeholders rather than credential-shaped values. I then reran the TypeScript build and all four automated tests successfully. Finally, I ran the provider adapter with an unreachable local base URL; it returned the expected retryable provider error, which the HTTP controller maps to a safe 502 response. Public deployment and live Redis rate-limit verification remain environment-dependent because no hosting deployment or reachable Redis service is configured in this workspace.
+## 22. Production deployment
+
+I deployed ModelGate to Render at `https://modelgate.onrender.com`. I verified the public health endpoint, created a virtual key through the protected deployment endpoint, sent a real Gemini request, and queried its usage summary. The production request returned 200 and its usage record contained one successful request with persisted token totals. Secrets were supplied as Render private environment variables and were not committed to the repository.
