@@ -17,13 +17,14 @@ export async function createVirtualKey(req: Request, res: Response, next: NextFu
 
 export async function getKeyUsage(req: Request, res: Response, next: NextFunction) {
   try {
-    const plaintextKey = Array.isArray(req.params.key) ? req.params.key[0] : req.params.key;
+    const plaintextKey = req.header("x-api-key");
+    if (!plaintextKey) return res.status(400).json({ error: { code: "missing_gateway_key", message: "Provide an x-api-key header", requestId: res.locals.requestId } });
     const key = await ApiKey.findOne({ keyHash: hashGatewayKey(plaintextKey) }).lean();
     if (!key) return res.status(404).json({ error: { code: "key_not_found", message: "Gateway key not found", requestId: res.locals.requestId } });
     const summary = await UsageLog.aggregate([
       { $match: { apiKeyId: key._id } },
-      { $group: { _id: "$apiKeyId", requests: { $sum: 1 }, successfulRequests: { $sum: { $cond: [{ $eq: ["$status", "success"] }, 1, 0] } }, estimatedCostUsd: { $sum: "$estimatedCostUsd" }, inputTokens: { $sum: "$inputTokens" }, outputTokens: { $sum: "$outputTokens" } } }
+      { $group: { _id: "$apiKeyId", requests: { $sum: 1 }, successfulRequests: { $sum: { $cond: [{ $eq: ["$status", "success"] }, 1, 0] } }, pendingRequests: { $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] } }, failedRequests: { $sum: { $cond: [{ $eq: ["$status", "failed"] }, 1, 0] } }, estimatedCostUsd: { $sum: "$estimatedCostUsd" }, inputTokens: { $sum: "$inputTokens" }, outputTokens: { $sum: "$outputTokens" } } }
     ]);
-    res.json({ name: key.name, active: key.active, requestLimit: key.requestLimit, requestsUsed: key.requestsUsed, usage: summary[0] ?? { requests: 0, successfulRequests: 0, estimatedCostUsd: 0, inputTokens: 0, outputTokens: 0 } });
+    res.json({ name: key.name, active: key.active, requestLimit: key.requestLimit, requestsUsed: key.requestsUsed, usage: summary[0] ?? { requests: 0, successfulRequests: 0, pendingRequests: 0, failedRequests: 0, estimatedCostUsd: 0, inputTokens: 0, outputTokens: 0 } });
   } catch (error) { next(error); }
 }
