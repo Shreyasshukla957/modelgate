@@ -8,9 +8,12 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "test": "npm run build && node --test tests/*.test.mjs",
+    "test:integration": "npm run build && node tests/integration/run.mjs",
     "seed:key": "tsx src/scripts/create-key.ts"
   },
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
@@ -22,7 +25,6 @@
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.5",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "typescript": "^5.7.2"
   }
 }
