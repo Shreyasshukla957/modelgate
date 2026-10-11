@@ -1,5 +1,33 @@
 # AI-LOG
 
+## Current status and follow-up: 11 October 2026
+
+Earlier numbered sections are a chronological record, not a list of currently pending tasks. The reviewed implementation remains separate from the existing Render deployment. The developer authorized focused local commits in this follow-up; pushing and deployment have not been authorized.
+
+### AI tools and responsibilities
+
+Codex assisted with requirement analysis, implementation, code review, documentation, and verification. This follow-up used Codex with GPT-6. Earlier entries identify Codex, but do not reliably record a model version for each session. Most implementation was AI-assisted; authorship does not imply the developer has already mastered every part of it.
+
+### Where the AI was wrong and how it was caught
+
+An earlier claim described successful-provider response validation as complete, but the schema allowed missing usage and accepted an empty object. Reviewing the schema and exercising malformed responses exposed the mismatch. The corrected adapter requires completion choices and nonnegative integer token counts. Another accounting gap allowed a resolved database update that matched no record to be treated as saved; the follow-up now checks acknowledgment and matched count.
+
+### Developer direction that changed the AI approach
+
+The developer asked to keep the project understandable, follow the assignment scope, and avoid adding more test files merely because testing is possible. This follow-up used existing checks and a temporary in-memory failure exercise, without creating new test files. Earlier test files remain in the working project; they were not silently deleted. The developer also required explicit authorization before Git writes, then authorized focused local commits. Push remains pending.
+
+### Review and control of generated code
+
+The code review checked that virtual keys are hashed, provider secrets remain server-side, quota is reserved before inference, and failed usage persistence cannot be reported as a normal success. Existing automated checks passed all 24 cases. A real local integration run then passed Gemini inference, MongoDB usage persistence with matching token counts, the usage summary, and a 20-way race for one remaining request followed by HTTP 429. Temporary integration records were cleaned up. A separate in-memory exercise confirmed that a missing usage record produces 503 after two update attempts without repeating inference. These are recorded verification results; they do not imply the current Render deployment includes the fixes.
+
+### Learning from scratch and interview preparation
+
+The developer identified LLM gateways as a new topic. Codex compared ModelGate with the existing MailRise Express/Mongoose/Gemini code and identified the additional concepts to study: virtual keys and HMAC, atomic quota reservations, budgets versus rate limits, token-cost estimates, timeouts/retries, and accounting failures. The code and verification supplied concrete examples for that study. The developer has not yet completed the planned walkthrough or demonstrated independent command of every decision; this log does not claim otherwise. Before a follow-up interview, the developer should trace a successful request, an exhausted quota, a provider failure, and a failed usage write in their own words.
+
+### Scope and unresolved limits
+
+The follow-up addresses provider validation and honest usage outcomes rather than adding stretch features. Pending records still require manual investigation; lost provider acknowledgments and process crashes can leave unknown spend. Live Redis was not verified. A limited reviewer key and post-release production verification remain handoff tasks, not completed actions.
+
 This file is maintained while the project is built. It records how AI assistance was used and what was independently reviewed or changed.
 
 ## 1. Requirement analysis
@@ -117,3 +145,11 @@ I added `TESTING.md` so a reviewer can repeat the automated and local API checks
 ## 22. Production deployment
 
 I deployed ModelGate to Render at `https://modelgate.onrender.com`. I verified the public health endpoint, created a virtual key through the protected deployment endpoint, sent a real Gemini request, and queried its usage summary. The production request returned 200 and its usage record contained one successful request with persisted token totals. Secrets were supplied as Render private environment variables and were not committed to the repository.
+
+## 23. Whole-codebase security and correctness review
+
+At the developer's request, Codex reviewed the whole current codebase using separate security/correctness and requirements reviews. The findings included accepting invalid upstream responses as zero-cost successes, reflecting raw upstream errors, putting virtual keys in usage URLs, mishandling JSON-parser errors, losing successful inference metadata after a usage-write failure, and breaking all requests after a Redis disconnect. The dependency audit also found nine advisories in the unused Vitest development dependency tree; removing that unused dependency left the audit with no reported advisories.
+
+The fixes require actual completion and token fields, sanitize provider errors, reject provider redirects, move usage credentials into headers, preserve request IDs on parser errors, and create pending usage records before inference. Successful usage updates are idempotent and retried once; unresolved records remain identifiable instead of being rewritten as zero-cost failures. Redis failures bypass only the optional burst check with a bounded wait; MongoDB budgets remain active. Fallback pricing must be explicit. Documentation now describes the current implementation instead of leaving Redis and request IDs listed as unimplemented.
+
+Verification: npm test completed the TypeScript build and all 24 regression tests passed, including fallback-configuration coverage. A real MongoDB check subsequently confirmed one winner among 20 concurrent reservations for a key with one remaining request, followed by HTTP 429 for the exhausted key. A real Gemini integration attempt returned 502 after retries, so a successful external-provider check is not claimed for this review. All temporary database records created by the integration checks are cleaned up. The automated test results and limitations are recorded in TESTING.md and REVIEW.md. No commits or pushes were made during this review, following the developer's instruction.

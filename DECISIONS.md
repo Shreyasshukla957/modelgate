@@ -2,75 +2,67 @@
 
 ## What I built
 
-This is a non-streaming HTTP LLM gateway built with TypeScript, Express, MongoDB, and an Gemini Gemini API compatibility endpoint. Clients call the gateway with a virtual key, not the provider credential. The gateway reserves a request against the key's quota, calls the configured model, writes a usage record, and returns the provider response.
+ModelGate is a non-streaming TypeScript/Express gateway in front of Gemini's OpenAI-compatible endpoint. Clients authenticate with gateway-issued virtual keys while provider credentials stay on the server. MongoDB atomically enforces request budgets and stores usage outcomes, token counts, and estimated costs. Optional Redis limits bursts, while a bounded retry policy handles transient provider failures.
 
 ## Request lifecycle
 
-~~~text
-Client -> POST /v1/chat/completions (x-api-key)
-       -> HMAC virtual key and atomically reserve request quota in MongoDB
-       -> Gemini OpenAI-compatible provider call
-       -> retry once for transient errors -> optional fallback model
-       -> persist token usage / estimated cost / outcome
-       -> return provider response
-~~~
+```text
+Client -> request ID / JSON validation -> virtual key authentication
+       -> optional Redis burst check -> atomic MongoDB quota reservation
+       -> pending usage record -> Gemini -> retry / optional fallback
+       -> update usage outcome -> response
+```
 
-## Key decisions
+If quota is exhausted, no provider request is sent. If the pending usage record cannot be created, inference is also blocked, with a 503 response; the reserved quota remains consumed. Both admin authentication and an x-api-key header are required to read usage; credentials never need to appear in a URL.
 
-### 1. Request-count budgets
+## Five important decisions
 
-I use a hard request-count limit rather than a token or currency cap. The gateway knows whether a request is allowed before calling the provider, so it can enforce the rule exactly. Output-token cost is only known after inference, so a strict cost cap would require reserving a pessimistic maximum cost and settling it later.
+### 1. Requests rather than tokens or currency for hard budgets
 
-### 2. Atomic quota reservation
+A request count is known before inference and can be enforced exactly with one database update. A cost cap would require pessimistic token reservations and later settlement. I chose a request budget and report cost estimates separately, accepting that individual requests can have different costs.
 
-I use one conditional findOneAndUpdate operation that only increments requestsUsed if it is still below requestLimit. This prevents two concurrent requests on a nearly exhausted key from both passing the check. Only one can reserve the final request.
+### 2. Atomic reservation rather than read-then-increment
 
-### 3. Key handling
+MongoDB findOneAndUpdate checks active status and requestsUsed < requestLimit before incrementing in the same operation. This prevents concurrent requests from exceeding a key's allowance. Reservations remain consumed even when provider or usage storage fails, which prevents retry abuse but can penalize clients during outages.
 
-The API returns a plaintext rk_ key exactly once, then stores only an HMAC-SHA-256 hash using a server-side pepper. A database leak therefore does not reveal usable gateway keys.
+### 3. Hashed keys rather than stored plaintext
 
-### 4. Non-streaming provider calls
+Virtual keys are generated with cryptographic randomness and returned once. MongoDB stores an HMAC-SHA-256 hash using a server-side pepper. This reduces credential exposure from database leaks, but losing or changing the pepper invalidates existing keys. The admin secret is compared through constant-time digest comparison. Usage lookup accepts credentials in headers instead of a URL, and responses are marked no-store.
 
-I chose non-streaming calls because the completed response reliably provides usage data that can be persisted alongside the request. Streaming is useful for user experience, but it adds response-forwarding and late-usage accounting complexity that is not central to this version.
+### 4. Synchronous usage writes rather than an analytics queue
 
-### 5. Resilience policy
+I chose pending records and synchronous outcome updates to keep accounting observable without adding a queue. After a successful inference, the update to the same record is retried once. Persistent failure returns 503 and never deliberately overwrites a paid success with a zero-cost failure. A pending record can represent incomplete work or unresolved persistence; summaries expose that state instead of claiming complete spend figures. This is not transactional exactly-once inference or billing: process crashes, lost acknowledgments, and failed writes can still leave unknown usage. A durable reconciliation queue would address that in a larger system.
 
-The gateway makes one additional attempt for transient failures such as timeouts, 429s, and 5xx responses. If a separate fallback model is configured, it tries that after the primary retries. It does not retry invalid requests or authentication failures. Failed provider attempts are logged and count against the request quota, preventing an unavailable provider from becoming an unlimited retry path.
+### 5. Non-streaming inference with bounded retries
 
-## Why enforce budgets at the gateway?
+Non-streaming responses make completion and token validation straightforward. Streaming would add partial delivery and late-usage accounting. One retry is made for timeouts, 429, and 5xx errors, then a separate fallback model is tried if configured. Invalid requests and authentication failures are not retried. Upstream redirects and malformed successful responses are rejected. Clients receive sanitized errors, not raw provider diagnostics. Fallback input/output prices must be explicitly configured.
 
-The gateway is the last trusted service before the provider credential and billable request. A caller can be buggy, compromised, or intentionally bypass its own local check. Enforcing the limit where provider access is controlled makes the policy dependable for every client.
+An outcome update counts as saved only when MongoDB acknowledges it and matches exactly one usage record. A missing record is treated as a persistence failure, even if the command itself resolves successfully. Retrying an identical update is safe even if the first attempt already applied it; a zero modified count alone is not a failure.
+
+## Why budgets belong at the gateway
+
+The gateway controls the provider credential and the last step before a potentially billable request. Caller-side checks can be bypassed or implemented incorrectly. Enforcing quota here makes every caller follow the same policy.
 
 ## Concurrency
 
-Two simultaneous requests for a key with one request remaining run the same conditional update. MongoDB applies each single-document update atomically and re-evaluates the condition, so only one can increment the counter. The other receives a 429 before any provider call.
+Two requests competing for the last reservation run a conditional single-document update. Only one can increment the counter. The real MongoDB integration check uses 20 competing reservations and verifies that only one wins. Quota reservation and usage creation are separate writes: a process failure between them can consume quota without creating a usage record.
+
+## Redis policy
+
+Redis is an optional fixed-window burst limit, separate from the durable total-request budget. A Lua script increments a per-key clock-minute counter and applies expiry atomically. The default is 10 requests per minute; the eleventh returns 429 with Retry-After calculated to the next minute boundary. Fixed windows can allow a double burst across a boundary; a sliding window would be smoother but requires more state.
+
+Connection uses a URL or host/port/password, with a five-second startup connection timeout and reconnect disabled. Offline commands are not queued. Missing, disconnected, failing, or stalled Redis bypasses this optional check; command waiting is bounded to one second. MongoDB quota enforcement still runs. This explicitly favors gateway availability over guaranteed burst protection during Redis outages. The Redis client must be reconnected by restarting the service after a sustained disconnect. The one-second timeout bounds waiting, but cannot cancel a command already sent to Redis.
 
 ## Deliberate scope cuts
 
-I did not build a polished frontend, user accounts, multi-tenant permissions, streaming, semantic caching, or a cost-based hard cap. The assignment prioritizes a small service whose security and core accounting behavior can be explained and tested.
+No polished frontend, user accounts, streaming, semantic caching, model training, multi-tenant permissions, or hard currency caps. The assignment prioritizes a working backend whose enforcement and tradeoffs can be explained. This review adds corrections to existing requirements rather than new stretch features.
 
 ## Least-certain decision
 
-Counting a failed provider attempt against the quota protects the provider and avoids retry abuse, but it can feel unfair when the upstream fails. Releasing the reservation would improve fairness, but could allow repeated failures to bypass a fixed quota. In a production version I would separate billable quota from an independently rate-limited failure budget and alert on provider failures.
+Keeping reservations consumed during failures protects against repeated billable attempts, but is unfair when inference never starts. Releasing reservations would improve fairness, yet requires careful ownership and settlement to avoid retry or concurrency abuse. I would separate total billable quota from a failure-attempt budget before implementing refunds.
 
-## With one more week
+## Where it breaks and one more week
 
-I would add key rotation and revocation, idempotency keys, structured request IDs, provider-specific adapters, a background queue for analytics, alerting, per-model allow-lists, token/cost reservations, an authenticated dashboard, and integration tests backed by ephemeral MongoDB.
+Provider timeouts can cause unknown upstream spend; retries may repeat completed upstream work. Current totals include reported successful-response usage, not definitive provider invoices. Pending records require manual investigation after crashes or persistent write failures. The health endpoint is liveness only, not a guarantee of datastore or provider readiness. Admin authentication is a shared secret without a dedicated brute-force limiter. Redis is optional and fixed windows permit boundary bursts. Generated output and concurrent in-flight inference have no separate configurable caps.
 
-## Redis rate limiting: planned production safeguard
-
-The assignment requires a hard per-key budget: each virtual key must have a cap measured in requests, tokens, or cost, and the gateway must block requests once that cap is exhausted. The current implementation uses an atomic MongoDB request-count reservation for this requirement.
-
-A rate limit is a separate control. It limits how quickly a valid key may send requests in a short time window, such as 10 requests per minute. It does not replace the total budget because a key can remain under a per-minute rate while eventually exceeding its total allowance.
-
-For a production extension, I would add Redis before the MongoDB budget reservation. The gateway would atomically increment a key such as `rate-limit:<key-hash>:<minute-window>`, set a 60-second expiry, and return `429 rate_limited` when the configured threshold is exceeded. A Lua script or Redis transaction would make the increment and initial expiry atomic. MongoDB would remain the source of truth for durable budgets and usage records.
-
-I have deliberately not added Redis to the current core because the assignment values a small, working gateway over unnecessary infrastructure. It is listed as the next hardening step after real Gemini and MongoDB integration testing.
-
-## Redis burst rate limit
-
-Redis rate limiting is now implemented as an optional production layer. When either `REDIS_URL` or `REDIS_HOST`/`REDIS_PORT`/`REDIS_PASSWORD` is configured, ModelGate uses an atomic Redis Lua script to increment a per-key counter and set its 60-second expiry in the same operation. The configured limit defaults to 10 requests per minute. A request beyond that limit returns `429 rate_limited` with `Retry-After`. MongoDB remains responsible for the durable total request budget and usage records. If Redis is intentionally not configured, the gateway continues with the required MongoDB budget enforcement only.
-
-### Redis availability behavior
-
-Redis is an optional burst-control layer. Startup attempts one connection with a five-second timeout and no reconnect loop. If the configured Redis service is unavailable, the application logs the condition and continues with MongoDB's atomic total-request budget, which is the assignment's required enforcement. When Redis is connected, the rate-limit middleware becomes active automatically. This makes a stale optional Redis endpoint unable to prevent the core gateway from starting, while keeping deployment failures visible in logs.
+Next priorities: durable usage reconciliation, request idempotency, admin rate limiting, key revocation/rotation, readiness checks, output/concurrency limits, and deployment alerts. Integration tests against a disposable local MongoDB/Redis setup would make outage tests more representative without relying on paid external services.
