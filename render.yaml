@@ -22,7 +22,7 @@ services:
       - key: PRIMARY_MODEL
         value: gemini-3.8-flash
       - key: REQUEST_TIMEOUT_MS
-        value: "20000"
+        value: "60000"
       - key: REDIS_URL
         sync: false
       - key: RATE_LIMIT_REQUESTS_PER_MINUTE
