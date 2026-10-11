@@ -10,14 +10,27 @@ const incrementWithExpiry = `
 
 export type RateLimitResult = { allowed: boolean; retryAfterSeconds?: number; remaining?: number };
 
-export async function enforceRateLimit(keyHash: string): Promise<RateLimitResult> {
-  const redis = getRedisClient();
-  if (!redis) return { allowed: true };
+export async function enforceRateLimit(
+  keyHash: string,
+  redis: Pick<NonNullable<ReturnType<typeof getRedisClient>>, "isReady" | "eval"> | undefined = getRedisClient()
+): Promise<RateLimitResult> {
+  if (!redis || !redis.isReady) return { allowed: true };
   const window = Math.floor(Date.now() / WINDOW_MS);
   const key = `modelgate:rate-limit:${keyHash}:${window}`;
-  const count = Number(await redis.eval(incrementWithExpiry, { keys: [key], arguments: [String(WINDOW_MS)] }));
+  let count: number;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    count = Number(await Promise.race([
+      redis.eval(incrementWithExpiry, { keys: [key], arguments: [String(WINDOW_MS)] }),
+      new Promise<never>((_resolve, reject) => { timeout = setTimeout(() => reject(new Error("Redis rate-limit timeout")), 1_000); })
+    ]));
+  } catch {
+    console.warn("Redis rate limit unavailable; MongoDB request budget remains enforced");
+    return { allowed: true };
+  } finally {
+    clearTimeout(timeout);
+  }
   const remaining = Math.max(0, env.RATE_LIMIT_REQUESTS_PER_MINUTE - count);
   if (count <= env.RATE_LIMIT_REQUESTS_PER_MINUTE) return { allowed: true, remaining };
-  const ttl = await redis.pTTL(key);
-  return { allowed: false, remaining: 0, retryAfterSeconds: Math.max(1, Math.ceil(ttl / 1000)) };
+  return { allowed: false, remaining: 0, retryAfterSeconds: Math.max(1, Math.ceil(((window + 1) * WINDOW_MS - Date.now()) / 1000)) };
 }

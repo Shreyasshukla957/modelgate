@@ -8,11 +8,12 @@ let redisClient: RedisClient | undefined;
 function createRedisClient() {
   const socket = { connectTimeout: 5_000, reconnectStrategy: false as false };
 
-  if (env.REDIS_URL) return createClient({ url: env.REDIS_URL, socket });
+  if (env.REDIS_URL) return createClient({ url: env.REDIS_URL, socket, disableOfflineQueue: true });
 
   if (env.REDIS_HOST && env.REDIS_PORT && env.REDIS_PASSWORD) {
     return createClient({
       password: env.REDIS_PASSWORD,
+      disableOfflineQueue: true,
       socket: { ...socket, host: env.REDIS_HOST, port: env.REDIS_PORT }
     });
   }
