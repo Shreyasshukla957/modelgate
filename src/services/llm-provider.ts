@@ -13,10 +13,16 @@ export type ProviderResult = {
 };
 
 const completionResponseSchema = z.object({
+  choices: z.array(z.object({
+    message: z.object({
+      content: z.string().nullable(),
+      role: z.literal("assistant").optional()
+    }).passthrough()
+  }).passthrough()).min(1),
   usage: z.object({
-    prompt_tokens: z.number().int().nonnegative().optional(),
-    completion_tokens: z.number().int().nonnegative().optional()
-  }).optional()
+    prompt_tokens: z.number().int().nonnegative(),
+    completion_tokens: z.number().int().nonnegative()
+  }).passthrough()
 }).passthrough();
 
 class ProviderError extends Error {
@@ -27,18 +33,8 @@ class ProviderError extends Error {
 
 const costFor = (usingFallback: boolean): ModelCost =>
   usingFallback
-    ? { inputPer1M: env.FALLBACK_INPUT_COST_PER_1M_USD, outputPer1M: env.FALLBACK_OUTPUT_COST_PER_1M_USD }
+    ? { inputPer1M: env.FALLBACK_INPUT_COST_PER_1M_USD!, outputPer1M: env.FALLBACK_OUTPUT_COST_PER_1M_USD! }
     : { inputPer1M: env.PRIMARY_INPUT_COST_PER_1M_USD, outputPer1M: env.PRIMARY_OUTPUT_COST_PER_1M_USD };
-
-function providerErrorMessage(body: unknown) {
-  const errorBody = Array.isArray(body) ? body[0] : body;
-  if (typeof errorBody !== "object" || !errorBody || !("error" in errorBody)) return "Provider request failed";
-  const error = (errorBody as { error?: unknown }).error;
-  if (typeof error !== "object" || !error || !("message" in error)) return "Provider request failed";
-  return typeof (error as { message?: unknown }).message === "string"
-    ? (error as { message: string }).message
-    : "Provider request failed";
-}
 
 async function callGeminiOpenAiEndpoint(model: string, messages: ChatMessage[], temperature?: number) {
   const controller = new AbortController();
@@ -52,14 +48,16 @@ async function callGeminiOpenAiEndpoint(model: string, messages: ChatMessage[], 
         authorization: `Bearer ${env.GEMINI_API_KEY}`
       },
       body: JSON.stringify({ model, messages, temperature, stream: false }),
+      redirect: "error",
       signal: controller.signal
     });
-    const body = await response.json().catch(() => ({ error: { message: "Provider returned invalid JSON" } }));
-
     if (!response.ok) {
-      throw new ProviderError(providerErrorMessage(body), response.status, isRetryableProviderStatus(response.status));
+      throw new ProviderError("Provider request failed", response.status, isRetryableProviderStatus(response.status));
     }
-    return completionResponseSchema.parse(body);
+    const body: unknown = await response.json();
+    const parsed = completionResponseSchema.safeParse(body);
+    if (!parsed.success) throw new ProviderError("Provider returned an invalid completion", 502, true);
+    return parsed.data;
   } catch (error) {
     if (error instanceof ProviderError) throw error;
     const message = error instanceof Error && error.name === "AbortError" ? "Provider request timed out" : "Provider is unavailable";
@@ -80,8 +78,8 @@ export async function createChatCompletion(messages: ChatMessage[], temperature?
   for (const candidate of candidates) {
     try {
       const body = await callGeminiOpenAiEndpoint(candidate.model, messages, temperature);
-      const inputTokens = body.usage?.prompt_tokens ?? 0;
-      const outputTokens = body.usage?.completion_tokens ?? 0;
+      const inputTokens = body.usage.prompt_tokens;
+      const outputTokens = body.usage.completion_tokens;
       return {
         body,
         model: candidate.model,

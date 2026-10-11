@@ -12,7 +12,7 @@ const envSchema = z.object({
   GEMINI_BASE_URL: z.string().url().default("https://generativelanguage.googleapis.com/v1beta/openai"),
   PRIMARY_MODEL: z.string().min(1).default("gemini-3.8-flash"),
   FALLBACK_MODEL: optionalString,
-  REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
+  REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
   REDIS_URL: optionalString.pipe(z.string().url().optional()),
   REDIS_HOST: optionalString,
   REDIS_PORT: z.preprocess(
@@ -23,9 +23,12 @@ const envSchema = z.object({
   RATE_LIMIT_REQUESTS_PER_MINUTE: z.coerce.number().int().positive().default(10),
   PRIMARY_INPUT_COST_PER_1M_USD: z.coerce.number().nonnegative().default(0.75),
   PRIMARY_OUTPUT_COST_PER_1M_USD: z.coerce.number().nonnegative().default(3.75),
-  FALLBACK_INPUT_COST_PER_1M_USD: z.coerce.number().nonnegative().default(0),
-  FALLBACK_OUTPUT_COST_PER_1M_USD: z.coerce.number().nonnegative().default(0)
+  FALLBACK_INPUT_COST_PER_1M_USD: z.preprocess(value => value === "" ? undefined : value, z.coerce.number().nonnegative().optional()),
+  FALLBACK_OUTPUT_COST_PER_1M_USD: z.preprocess(value => value === "" ? undefined : value, z.coerce.number().nonnegative().optional())
 }).superRefine((values, context) => {
+  if (values.FALLBACK_MODEL && (values.FALLBACK_INPUT_COST_PER_1M_USD === undefined || values.FALLBACK_OUTPUT_COST_PER_1M_USD === undefined)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "Set both fallback prices explicitly when configuring a fallback model." });
+  }
   const hostConfigValues = [values.REDIS_HOST, values.REDIS_PORT, values.REDIS_PASSWORD];
   const hasAnyHostConfig = hostConfigValues.some(Boolean);
   const hasCompleteHostConfig = hostConfigValues.every(Boolean);

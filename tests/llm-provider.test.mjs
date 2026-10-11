@@ -7,6 +7,9 @@ process.env.GATEWAY_KEY_PEPPER = "b".repeat(32);
 process.env.GEMINI_API_KEY = "test-key";
 process.env.GEMINI_BASE_URL = "https://example.test/v1";
 process.env.PRIMARY_MODEL = "primary-model";
+process.env.FALLBACK_MODEL = "fallback-model";
+process.env.FALLBACK_INPUT_COST_PER_1M_USD = "3";
+process.env.FALLBACK_OUTPUT_COST_PER_1M_USD = "4";
 process.env.REQUEST_TIMEOUT_MS = "1000";
 process.env.PRIMARY_INPUT_COST_PER_1M_USD = "1";
 process.env.PRIMARY_OUTPUT_COST_PER_1M_USD = "2";
@@ -32,6 +35,48 @@ test("retries a transient provider failure and returns token usage", async () =>
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+for (const [name, payload] of [
+  ["empty object", "{}"],
+  ["error-only body", JSON.stringify({ error: { message: "not a completion" } })],
+  ["invalid JSON", "not JSON"],
+  ["missing usage", JSON.stringify({ choices: [{ message: { content: "hello" } }] })]
+]) {
+  test(`rejects HTTP 200 with ${name}`, async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(payload);
+    try {
+      await assert.rejects(() => createChatCompletion(messages), error => error instanceof ProviderError);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+}
+
+test("uses fallback after primary retries and applies fallback pricing", async () => {
+  const originalFetch = globalThis.fetch;
+  const models = [];
+  globalThis.fetch = async (_url, options) => {
+    models.push(JSON.parse(options.body).model);
+    if (models.length < 3) return new Response("{}", { status: 503 });
+    return new Response(JSON.stringify({ choices: [{ message: { content: "fallback" } }], usage: { prompt_tokens: 10, completion_tokens: 5 } }));
+  };
+  try {
+    const result = await createChatCompletion(messages);
+    assert.deepEqual(models, ["primary-model", "primary-model", "fallback-model"]);
+    assert.equal(result.usedFallback, true);
+    assert.equal(result.estimatedCostUsd, 0.00005);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("does not expose provider error text or follow redirects", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, options) => {
+    assert.equal(options.redirect, "error");
+    return new Response(JSON.stringify({ error: { message: "secret-provider-credential" } }), { status: 401 });
+  };
+  try {
+    await assert.rejects(() => createChatCompletion(messages), error => error instanceof ProviderError && !error.message.includes("secret-provider"));
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test("does not retry a non-recoverable provider failure", async () => {
