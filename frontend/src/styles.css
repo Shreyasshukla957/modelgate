@@ -1,0 +1,8 @@
+@import "tailwindcss";
+
+@layer base {
+  body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+  input { width: 100%; box-sizing: border-box; border: 0; border-bottom: 1px solid rgb(25 35 28 / .16); background: transparent; padding: .65rem 0; color: #252c26; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; outline: none; transition: border-color .2s; }
+  input::placeholder { color: #a0a8a1; }
+  input:focus { border-color: #7f9f2d; }
+}
