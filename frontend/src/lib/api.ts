@@ -1,4 +1,4 @@
-import type { KeyUsage, NewKey } from "../types/gateway";
+import type { GatewayHealth, KeyUsage, NewKey } from "../types/gateway";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "";
 
@@ -81,4 +81,10 @@ export const getKeyUsage = async ({
       },
     })
   ));
+};
+
+export const getGatewayHealth = async (): Promise<GatewayHealth> => {
+  const value = await parseResponse(await fetch(`${apiBaseUrl}/health`));
+  if (!isRecord(value) || value.status !== "ok") throw new Error("The gateway health response is invalid.");
+  return value as GatewayHealth;
 };
