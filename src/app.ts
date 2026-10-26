@@ -1,5 +1,7 @@
 import express from "express";
 import crypto from "node:crypto";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { ZodError } from "zod";
 import { adminRouter } from "./routes/admin.js";
 import { completionRouter } from "./routes/completions.js";
@@ -18,6 +20,9 @@ app.use(express.json({ limit: "100kb" }));
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 app.use("/v1/admin", adminRouter);
 app.use("/v1", completionRouter);
+const frontendDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "public");
+app.use(express.static(frontendDirectory));
+app.get(/^\/(?!v1(?:\/|$)|health$).*/, (_req, res) => res.sendFile(path.join(frontendDirectory, "index.html")));
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   const parserError = error as { type?: string } | null;
@@ -27,4 +32,3 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
   console.error("Gateway request failed", { requestId: res.locals.requestId, errorType: error instanceof Error ? error.name : "UnknownError" });
   res.status(500).json({ error: { code: "internal_error", message: "Unexpected gateway error", requestId: res.locals.requestId } });
 });
-

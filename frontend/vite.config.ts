@@ -5,6 +5,6 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   root: "frontend",
   plugins: [react(), tailwindcss()],
-  build: { outDir: "../frontend-dist", emptyOutDir: true },
+  build: { outDir: "../dist/public", emptyOutDir: false },
   server: { port: 5173, proxy: { "/v1": "http://127.0.0.1:3000", "/health": "http://127.0.0.1:3000" } },
 });

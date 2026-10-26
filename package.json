@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && npm run build:ui",
     "dev:ui": "vite --config frontend/vite.config.ts",
     "build:ui": "vite build --config frontend/vite.config.ts",
     "start": "node dist/server.js",
