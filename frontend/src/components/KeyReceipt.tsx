@@ -1,0 +1,3 @@
+export const KeyReceipt = ({ value, warning }: { value: string; warning: string }) => {
+  return <section className="mt-7 overflow-hidden rounded-2xl border border-[#c6d782] bg-[#f4f8d9]"><div className="flex items-center justify-between border-b border-[#d5e29d] px-5 py-3"><p className="font-mono text-[10px] font-semibold uppercase tracking-[.15em] text-[#607324]">Access receipt</p><span className="text-xs font-medium text-[#6c7e2b]">Copy before leaving</span></div><code className="block break-all px-5 py-5 font-mono text-sm text-[#34470d]">{value}</code><p className="border-t border-[#d5e29d] px-5 py-3 text-xs text-[#66762e]">{warning}</p></section>;
+};
